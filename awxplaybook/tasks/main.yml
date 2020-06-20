@@ -1,0 +1,99 @@
+---
+# tasks file for awx
+
+## step1: Installing the epel packages
+ - name: Installing the epel packages
+   shell:
+     cmd:  dnf install epel-release -y
+     warn: no
+   register: epel_status
+ - debug:
+     msg: "successfully installed {{epel_status.stdout_lines[0]}}"
+   when: epel_status is success and epel_status.stdout_lines is defined
+
+
+## step2: Installing additional packages and dependencies
+ - name: Installing AWX dependencies
+   package:
+     name: "{{ item }}"
+     state: present
+   with_items: "{{ awx_package_dependencies }}"
+ - debug:
+     msg: "successfully installed dependencies"
+ 
+## Installing docker and starting docker service
+ - name: Installing docker and starting docker service
+   script: /etc/ansible/roles/awxplaybook/tasks/sample.sh --some-argument 1234
+ - debug:
+     msg: "successfully installed and started docker"
+
+## step4: cloning the gitrepo to install Awx
+ - name: Clone AWX into configured directory
+   git:
+     repo: "{{ awx_repo }}"
+     dest: "{{ awx_repo_dir }}"
+     version: "{{ awx_version }}"
+     update: "{{ awx_keep_updated }}"
+     force: true
+     accept_hostkey: true
+ - debug:
+     msg: "successfully cloned from git"
+
+## step5: Adjusting the parameters in inventory
+ - name: add replacements to the inventory
+   replace:
+     path   : "{{ item.path }}"
+     regexp : "{{ item.regex }}"
+     replace: "{{ item.replace }}"
+   with_items:
+     - { path: '/root/awx/installer/inventory', regex: '#awx_alternate_dns_servers="10.1.2.3,10.2.3.4', replace: 'awx_alternate_dns_servers="4.2.2.1,4.2.2.2' }
+     - { path: '/root/awx/installer/inventory', regex: '# awx_official=false', replace: 'awx_official=true' }
+     - { path: '/root/awx/installer/inventory', regex: '#project_data_dir=/var/lib/awx/projects', replace: 'project_data_dir=/var/lib/awx/projects' }
+     - { path: '/root/awx/installer/inventory', regex: 'postgres_data_dir="~/.awx/pgdocker', replace: 'postgres_data_dir=/var/lib/pgdocker' }
+ - debug:
+     msg: "Successfully changed the inventory" 
+
+## step6:  generating a cryptographic key for encryption of the inventory file(secretkey)
+ - name: Running the openssl and generating the secretkey
+   shell: openssl rand -base64 30
+   args:
+     warn: no
+   register: openssl_info
+ - debug:
+     msg: "success {{openssl_info.stdout_lines[0]}}"
+   when: openssl_info is success and openssl_info.stdout_lines is defined
+
+ - name: Replacing the secret key in inventory
+   replace:
+     path: /root/awx/installer/inventory
+     regexp: 'secret_key=awxsecret'
+     replace: 'secret_key={{openssl_info.stdout_lines[0]}}'
+
+## step7: Installing AWX
+ - include: awx-install-playbook.yml                    
+   when: awx_run_install_playbook
+ - debug:
+     msg: "successfully installed awx"
+
+## step8: checking  the containers which are launched via docker-compose
+ - name: checking the containers of dockerps
+   shell: docker ps
+   args:
+     warn: no
+ - debug:
+     msg: "successfully checked the dockerps"
+
+## step9: Installing firewalld
+ - name: installing firewalld
+   dnf:
+    name: 'firewalld'
+    state: present
+ - debug: 
+     msg: "successfully installed firewalld"
+
+## step10: starting and enabling firewalld
+ - name: starting and enabling firewalld service and adding http and https ports
+   script: /etc/ansible/roles/awxplaybook/tasks/firewall.sh --some-argument 1234
+ - debug:
+     msg: "successfully started and enabled firewalld and finally now use the ip to login into Awx dashboard"
+     
